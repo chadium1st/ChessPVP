@@ -2,14 +2,70 @@ from imports import *
 from square import *
 from move import *
 from const import *
+import copy
 
 class Board:
     def __init__(self):
         self.squares = [[0, 0, 0, 0, 0, 0, 0, 0] for col in range(COLS)]
+        self.last_move = None
         self._create()
         self._add_pieces("white")
         self._add_pieces("black")
 
+    def move(self, piece, move):
+        initial = move.initial
+        final = move.final
+
+        # console board move update
+        self.squares[initial.row][initial.col].piece = None
+        self.squares[final.row][final.col].piece = piece
+
+        # pawn promotion:
+        if isinstance(piece, Pawn):
+            self.check_promotion(piece, final)
+
+        # king castling:
+        if isinstance(piece, King):
+            if self.castling(initial, final):
+                diff = final.col - initial.col
+                rook = piece.left_rook if (diff < 0) else piece.right_rook
+                self.move(rook, rook.moves[-1])
+
+        # move
+        piece.moved = True
+
+        # clear valid moves
+        piece.clear_moves()
+        
+        # set last move
+        self.last_move = move
+
+    def valid_move(self, piece, move):
+        return move in piece.moves
+
+    def check_promotion(self, piece, final):
+        if final.row == 0 or final.row == 7:
+            self.squares[final.row][final.col].piece = Queen(piece.color)
+
+    def castling(self, initial, final):
+        return abs(initial.col - final.col) == 2
+
+    def in_check(self, piece, move):
+        temp_piece = copy.deepcopy(piece)
+        temp_board = copy.deepcopy(self)
+        temp_board.move(temp_piece, move)
+
+        for row in range(ROWS):
+            for col in range(COLS):
+                if temp_board.squares[row][col].has_enemy_piece(piece.color):
+                    # p = piece, m = move
+                    p = temp_board.squares[row][col].piece
+                    temp_board.calc_moves(p, row, col)
+
+                    for m in p.moves:
+                        if isinstance(m.final.piece, King):
+                            return True
+            return False
 
     def calc_moves(self, piece, row, col):
         '''
@@ -53,7 +109,15 @@ class Board:
             for move_col in move_cols:
                 if Square.in_range(move_row, move_col):
                     if self.squares[move_row][move_col].has_rival_piece(piece.color):
-                        new_move(move_row, move_col)
+                        # create initial and final move squares:
+                        initial = Square(row, col)
+                        final_piece = self.squares[move_row, move_col].piece
+                        final = Square(move_row, move_col, final_piece)
+
+                        # create a new move:
+                        new_move(initial, final)
+
+                        # a
 
         def knight_moves():
             # 8 maximum possible moves for a knight
@@ -76,7 +140,13 @@ class Board:
                 if Square.in_range(move_row, move_col):
                     # Checking if the square is empty or not:
                     if self.squares[move_row][move_col].isempty_or_rival(piece.color):
-                        new_move(move_row, move_col)
+                        # create initial and final move squares:
+                        initial = Square(row, col)
+                        final_piece = self.squares[move_row][move_col].piece
+                        final = Square(move_row, move_col, final_piece)
+
+                        # create a new move:
+                        new_move(initial, final)
 
         def straightline_moves(incrs):
             for inc in incrs:
@@ -89,8 +159,10 @@ class Board:
                 while True:
                     if Square.in_range(move_row, move_col):
                         # Create initial and final move squares:
+                        # create initial and final move squares:
                         initial = Square(row, col)
-                        final = Square(move_row, move_col)
+                        final_piece = self.squares[move_row, move_col].piece
+                        final = Square(move_row, move_col, final_piece)
 
                         # Create a possible new move:
                         move = Move(initial, final)
@@ -101,13 +173,13 @@ class Board:
                             piece.add_move(move)
                         
                         # Has rival piece:
-                        if self.squares[move_row][move_col].has_rival_piece(piece.color):
+                        elif self.squares[move_row][move_col].has_rival_piece(piece.color):
                             # Append move
                             piece.add_move(move)
                             break
 
                         # Has team piece:
-                        if self.squares[move_row][move_col].has_ally_piece(piece.color):
+                        elif self.squares[move_row][move_col].has_ally_piece(piece.color):
                             break
 
                     # If not in range
@@ -135,6 +207,59 @@ class Board:
                 if Square.in_range(move_row, move_col):
                     if self.squares[move_row][move_col].isempty_or_rival(piece.color):
                         new_move(move_row, move_col)
+
+            # castling moves:
+            if not piece.moved:
+
+                # short castle:
+                right_rook = self.squares[row][7].piece
+                if isinstance(right_rook, Rook):
+                    if not right_rook.moved:
+                        for c in range(5, 7):
+                            if self.squares[row][c].has_piece():
+                                # castling not possible
+                                break
+                        
+                            elif c == 6:
+                                # adds right rook to king
+                                piece.right_rook = right_rook
+
+                                # rook move:
+                                initial = Square(row, 7)
+                                final = Square(row, 5)
+                                move = Move(initial, final)
+                                right_rook.add_move(move)
+
+                                # king move:
+                                initial = Square(row, col)
+                                final = Square(row, 6)
+                                move = Move(initial, final)
+                                piece.add_move(move)
+
+                # long castle:
+                left_rook = self.squares[row][0].piece
+                if isinstance(left_rook, Rook):
+                    if not left_rook.moved:
+                        for c in range(1, 4):
+                            if self.squares[row][c].has_piece():
+                                # castling not possible
+                                break
+                        
+                            elif c == 3:
+                                # adds left rook to king
+                                piece.left_rook = left_rook
+
+                                # rook move:
+                                initial = Square(row, 0)
+                                final = Square(row, 3)
+                                move = Move(initial, final)
+                                left_rook.add_move(move)
+
+                                # king move:
+                                initial = Square(row, col)
+                                final = Square(row, 2)
+                                move = Move(initial, final)
+                                piece.add_move(move)
 
 
         if isinstance(piece, Pawn): pawn_moves()
